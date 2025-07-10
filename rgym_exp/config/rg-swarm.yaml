@@ -1,20 +1,31 @@
+# --- Model Selection ---
+# Choose the model to run from the command line, for example:
+# python [your_script.py] model_select=small_a
+# python [your_script.py] model_select=large_b
+
+model_select: large_c # This is the default model that will be used.
+
+model_choices:
+  # --- Small Models ---
+  small_a: "Gensyn/Qwen2.5-0.5B-Instruct"
+  small_b: "Qwen/Qwen3-0.6B"
+  # --- Large Models ---
+  large_a: "nvidia/AceInstruct-1.5B"
+  large_b: "dnotitia/Smoothie-Qwen3-1.7B"
+  large_c: "Gensyn/Qwen2.5-1.5B-Instruct"
+
+
 # Directory for all logs and outputs
 log_dir: ${oc.env:ROOT,.}/logs
 
 # --- Core Training & Mode Settings ---
 training:
-  # Set to 'false' to enable training mode.
-  # Set to 'true' for fast inference-only mode using vLLM.
-  use_vllm: false
-
-  # Set to 'true' to enable mixed-precision training.
-  # The python code is configured to use stable 'bfloat16' on compatible GPUs.
-  fp16: false
-
+  use_vllm: true
+  fp16: true
   max_round: 1000000
   max_stage: 1
   hf_push_frequency: 1
-  num_generations: 1 # Set to 1 for debugging, can be increased for GRPO
+  num_generations: 2
   num_transplant_trees: 2
   seed: 42
 
@@ -72,10 +83,9 @@ game_manager:
   trainer:
     _target_: rgym_exp.src.trainer.GRPOLanguageTrainerModule
     
-    # ✅ CORRECTED: Restored dynamic model selection.
-    # It will use the MODEL_NAME env var, or otherwise auto-select from the pools below.
+    # ✅ This now uses your selection from the top of the file.
     models:
-      - ${oc.env:MODEL_NAME, ${gpu_model_choice:${default_large_model_pool},${default_small_model_pool}}}
+      - ${model_choices.${model_select}}
 
     use_vllm: ${training.use_vllm}
 
@@ -83,9 +93,9 @@ game_manager:
       _target_: trl.trainer.GRPOConfig
       logging_dir: ${log_dir}
       fp16: ${training.fp16}
-      gradient_checkpointing: false
+      gradient_checkpointing: true
       max_completion_length: 512
-
+      
     log_with: wandb
     log_dir: ${log_dir}
     epsilon: 0.2
@@ -96,10 +106,7 @@ game_manager:
   data_manager:
     _target_: rgym_exp.src.data.ReasoningGymDataManager
     yaml_config_path: "rgym_exp/src/datasets.yaml"
-    
-    # This now acts as the training batch size.
-    num_train_samples: 2 # Increase for better performance
-    
+    num_train_samples: 2
     num_evaluation_samples: 0
     system_prompt_id: 'default'
     seed: ${training.seed}
@@ -118,12 +125,3 @@ game_manager:
     contract_address: ${blockchain.contract_address}
     org_id: ${blockchain.org_id}
     modal_proxy_url: ${blockchain.modal_proxy_url}
-    
-default_large_model_pool: 
-  - nvidia/AceInstruct-1.5B
-  - dnotitia/Smoothie-Qwen3-1.7B
-  - Gensyn/Qwen2.5-1.5B-Instruct
-
-default_small_model_pool:
-  - Gensyn/Qwen2.5-0.5B-Instruct
-  - Qwen/Qwen3-0.6B
