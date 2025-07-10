@@ -1,13 +1,20 @@
+# Directory for all logs and outputs
 log_dir: ${oc.env:ROOT,.}/logs
 
 # --- Core Training & Mode Settings ---
 training:
+  # Set to 'false' to enable training mode.
+  # Set to 'true' for fast inference-only mode using vLLM.
   use_vllm: false
+
+  # Set to 'true' to enable mixed-precision training.
+  # The python code is configured to use stable 'bfloat16' on compatible GPUs.
   fp16: false
+
   max_round: 1000000
   max_stage: 1
   hf_push_frequency: 1
-  num_generations: 2
+  num_generations: 1 # Set to 1 for debugging, can be increased for GRPO
   num_transplant_trees: 2
   seed: 42
 
@@ -65,10 +72,10 @@ game_manager:
   trainer:
     _target_: rgym_exp.src.trainer.GRPOLanguageTrainerModule
     
-    # --- FIX ---
-    # The models parameter now correctly references the predefined pool of models
-    # instead of relying on a single environment variable.
-    models: ${default_large_model_pool}
+    # ✅ CORRECTED: Restored dynamic model selection.
+    # It will use the MODEL_NAME env var, or otherwise auto-select from the pools below.
+    models:
+      - ${oc.env:MODEL_NAME, ${gpu_model_choice:${default_large_model_pool},${default_small_model_pool}}}
 
     use_vllm: ${training.use_vllm}
 
@@ -77,8 +84,6 @@ game_manager:
       logging_dir: ${log_dir}
       fp16: ${training.fp16}
       gradient_checkpointing: false
-      
-      # Added to fix short/incomplete model responses.
       max_completion_length: 512
 
     log_with: wandb
@@ -92,7 +97,8 @@ game_manager:
     _target_: rgym_exp.src.data.ReasoningGymDataManager
     yaml_config_path: "rgym_exp/src/datasets.yaml"
     
-    num_train_samples: 2 # Increase this value to use more GPU memory and speed up training.
+    # This now acts as the training batch size.
+    num_train_samples: 2 # Increase for better performance
     
     num_evaluation_samples: 0
     system_prompt_id: 'default'
@@ -109,8 +115,8 @@ game_manager:
   coordinator:
     _target_: genrl.blockchain.coordinator.ModalSwarmCoordinator
     web3_url: ${blockchain.alchemy_url}
-    contract_address: ${oc.env:SWARM_CONTRACT,null}
-    org_id: ${oc.env:ORG_ID,null}
+    contract_address: ${blockchain.contract_address}
+    org_id: ${blockchain.org_id}
     modal_proxy_url: ${blockchain.modal_proxy_url}
     
 default_large_model_pool: 
