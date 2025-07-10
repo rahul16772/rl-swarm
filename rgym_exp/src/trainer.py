@@ -11,6 +11,8 @@ from genrl.state import GameState
 from genrl.trainer.grpo_trainer import GRPOLanguageTrainerModule
 from reasoning_gym.utils import SYSTEM_PROMPTS
 
+# ✅ vLLM import (no model used directly here)
+from vllm import LLM
 
 class GRPOTrainerModule(GRPOLanguageTrainerModule, LoggerMixin):
     """
@@ -98,3 +100,4 @@ class GRPOTrainerModule(GRPOLanguageTrainerModule, LoggerMixin):
                 return
         else:
             return
+
