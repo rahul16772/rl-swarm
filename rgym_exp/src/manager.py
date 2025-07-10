@@ -1,8 +1,8 @@
-import logging
 import os
 import sys
 import time
 from collections import defaultdict
+from pathlib import Path
 
 from genrl.blockchain import SwarmCoordinator
 from genrl.communication import Communication
@@ -77,31 +77,49 @@ class SwarmGameManager(BaseGameManager, DefaultGameManagerMixin):
         self.coordinator.register_peer(self.peer_id)
         round, _ = self.coordinator.get_round_and_stage()
         self.state.round = round
-        self.communication.step_ = (
-            self.state.round
-        )  # initialize communication module to contract's round
+        self.communication.step_ = self.state.round
         self.submit_frequency = submit_frequency
 
-        # enable push to HF if token was provided
-        self.hf_token = hf_token
-        if self.hf_token not in [None, "None"]:
-            username = whoami(token=self.hf_token)["name"]
-            model_name = self.trainer.model.config.name_or_path.split("/")[-1]
-            model_name += "-Gensyn-Swarm"
-            model_name += f"-{self.animal_name}"
-            self.trainer.args.hub_model_id = f"{username}/{model_name}"
-            self.trainer.args.push_to_hub = True
-            self.trainer.args.hub_token = self.hf_token
-            self.hf_push_frequency = hf_push_frequency
-            get_logger().info("Logging into Hugging Face Hub...")
-
-            login(self.hf_token)
-
         get_logger().info(
-            f"🐱 Hello 🐈 [{get_name_from_peer_id(self.peer_id)}] 🦮 [{self.peer_id}]!"
+            f"🐱 Hello 🐈 [{get_name_from_peer_id(self.peer_id)}] 🥮 [{self.peer_id}]!"
         )
         get_logger().info(f"bootnodes: {kwargs.get('bootnodes', [])}")
-        get_logger().info(f"Using Model: {self.trainer.model.config.name_or_path}")
+
+        # ‼️ KEY FIX: Safely get the model name first, then use it.
+        model_name = "UnknownModel"
+        
+        # Check if we are in vLLM mode
+        if hasattr(self.trainer, "use_vllm") and self.trainer.use_vllm:
+            # In vLLM mode, use the name we saved in the trainer
+            model_name = getattr(self.trainer, "model_name", "vLLM_Model")
+        else:
+            # In standard training mode, safely access the config attribute
+            config_obj = getattr(getattr(self.trainer, "model", None), "config", None)
+            if config_obj:
+                model_name = getattr(config_obj, "_name_or_path", "UnknownModel")
+        
+        get_logger().info(f"Using Model: {model_name}")
+
+        # Enable push to HF if token was provided
+        self.hf_token = hf_token
+        if self.hf_token not in [None, "None"]:
+            # This block should only run if we can actually push, which means we're in training mode.
+            if not (hasattr(self.trainer, "use_vllm") and self.trainer.use_vllm):
+                try:
+                    username = whoami(token=self.hf_token)["name"]
+                    model_name_suffix = model_name.split("/")[-1]
+                    hub_model_id = f"{username}/{model_name_suffix}-Gensyn-Swarm-{self.animal_name}"
+                    
+                    self.trainer.args.hub_model_id = hub_model_id
+                    self.trainer.args.push_to_hub = True
+                    self.trainer.args.hub_token = self.hf_token
+                    self.hf_push_frequency = hf_push_frequency
+                    get_logger().info("Logging into Hugging Face Hub...")
+                    login(self.hf_token)
+                except Exception as e:
+                    get_logger().warning(f"Could not set up Hugging Face push. Error: {e}")
+            else:
+                get_logger().info("Hugging Face push is disabled in vLLM mode.")
 
         with open(os.path.join(log_dir, f"system_info.txt"), "w") as f:
             f.write(get_system_info())
@@ -120,34 +138,24 @@ class SwarmGameManager(BaseGameManager, DefaultGameManagerMixin):
         return rewards_by_agent
 
     def _hook_after_rewards_updated(self):
-        # submit rewards and winners to the chain
         if self.state.round % self.submit_frequency == 0:
             rewards_by_agent = self._get_total_rewards_by_agent()
             my_rewards = rewards_by_agent[self.peer_id]
-            my_rewards = (my_rewards + 1) * (my_rewards > 0) + my_rewards * (
-                my_rewards <= 0
-            )
-            self.coordinator.submit_reward(
-                self.state.round, 0, int(my_rewards), self.peer_id
-            )
+            my_rewards = (my_rewards + 1) * (my_rewards > 0) + my_rewards * (my_rewards <= 0)
+            self.coordinator.submit_reward(self.state.round, 0, int(my_rewards), self.peer_id)
 
             max_agent, max_rewards = max(rewards_by_agent.items(), key=lambda x: x[1])
             self.coordinator.submit_winners(self.state.round, [max_agent], self.peer_id)
 
     def _hook_after_round_advanced(self):
         self._save_to_hf()
-
-        # Block until swarm round advances
         self.agent_block()
 
     def _hook_after_game(self):
         self._save_to_hf()
 
     def _save_to_hf(self):
-        if (
-            self.hf_token not in [None, "None"]
-            and self.state.round % self.hf_push_frequency == 0
-        ):
+        if self.hf_token not in [None, "None"] and self.state.round % self.hf_push_frequency == 0:
             get_logger().info(f"pushing model to huggingface")
             try:
                 repo_id = self.trainer.args.hub_model_id
@@ -172,19 +180,14 @@ class SwarmGameManager(BaseGameManager, DefaultGameManagerMixin):
                     stack_info=True,
                 )
 
-    def agent_block(
-        self, check_interval=5.0, log_timeout=10.0, max_check_interval=60.0 * 15
-    ):
+    def agent_block(self, check_interval=5.0, log_timeout=10.0, max_check_interval=60.0 * 15):
         start_time = time.monotonic()
         fetch_log_time = start_time
-        check_backoff = (
-            check_interval  # Exponential backoff for already finished rounds.
-        )
+        check_backoff = check_interval
         while time.monotonic() - start_time < self.train_timeout:
             curr_time = time.monotonic()
             _ = self.communication.dht.get_visible_maddrs(latest=True)
 
-            # Retrieve current round and stage.
             try:
                 round_num, stage = self.coordinator.get_round_and_stage()
             except Exception as e:
@@ -199,13 +202,11 @@ class SwarmGameManager(BaseGameManager, DefaultGameManagerMixin):
 
             if round_num >= self.state.round:
                 get_logger().info(f"🐝 Joining round: {round_num}")
-                check_backoff = check_interval  # Reset backoff after successful round
-                self.state.round = round_num  # advance to swarm's round.
+                check_backoff = check_interval
+                self.state.round = round_num
                 return
             else:
-                get_logger().info(
-                    f"Already finished round: {round_num}. Next check in {check_backoff}s."
-                )
+                get_logger().info(f"Already finished round: {round_num}. Next check in {check_backoff}s.")
                 time.sleep(check_backoff)
                 check_backoff = min(check_backoff * 2, max_check_interval)
 
