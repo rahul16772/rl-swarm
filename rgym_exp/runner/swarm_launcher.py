@@ -13,6 +13,8 @@ from rgym_exp.src.utils.omega_gpu_resolver import (
     gpu_model_choice_resolver,
 )  # necessary for gpu_model_choice resolver in hydra config
 
+# ✅ Import vllm (no model specified)
+from vllm import LLM
 
 @hydra.main(version_base=None)
 def main(cfg: DictConfig):
@@ -27,3 +29,4 @@ if __name__ == "__main__":
     os.environ["HYDRA_FULL_ERROR"] = "1"
     Communication.set_backend(HivemindBackend)
     main()
+
