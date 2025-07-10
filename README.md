@@ -27,7 +27,6 @@ OR
 - CUDA devices (officially supported):
     - RTX 3090
     - RTX 4090
-    - RTX 5090
     - A100
     - H100
 
