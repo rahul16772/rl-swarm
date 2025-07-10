@@ -65,8 +65,10 @@ game_manager:
   trainer:
     _target_: rgym_exp.src.trainer.GRPOLanguageTrainerModule
     
-    models:
-      - ${oc.env:MODEL_NAME, "Gensyn/Qwen2.5-1.5B-Instruct"}
+    # --- FIX ---
+    # The models parameter now correctly references the predefined pool of models
+    # instead of relying on a single environment variable.
+    models: ${default_large_model_pool}
 
     use_vllm: ${training.use_vllm}
 
@@ -107,8 +109,8 @@ game_manager:
   coordinator:
     _target_: genrl.blockchain.coordinator.ModalSwarmCoordinator
     web3_url: ${blockchain.alchemy_url}
-    contract_address: ${blockchain.contract_address}
-    org_id: ${blockchain.org_id}
+    contract_address: ${oc.env:SWARM_CONTRACT,null}
+    org_id: ${oc.env:ORG_ID,null}
     modal_proxy_url: ${blockchain.modal_proxy_url}
     
 default_large_model_pool: 
