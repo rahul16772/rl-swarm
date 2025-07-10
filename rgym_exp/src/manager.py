@@ -1,3 +1,4 @@
+import logging  
 import os
 import sys
 import time
@@ -85,7 +86,7 @@ class SwarmGameManager(BaseGameManager, DefaultGameManagerMixin):
         )
         get_logger().info(f"bootnodes: {kwargs.get('bootnodes', [])}")
 
-        # ‼️ KEY FIX: Safely get the model name first, then use it.
+        # Safely get the model name first, then use it.
         model_name = "UnknownModel"
         
         # Check if we are in vLLM mode
