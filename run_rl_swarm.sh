@@ -67,8 +67,8 @@ ROOT_DIR="$(cd $(dirname ${BASH_SOURCE[0]}) && pwd)"
 cleanup() {
     echo_green ">> Shutting down trainer..."
 
-    # Remove modal credentials if they exist
-    rm -r $ROOT_DIR/modal-login/temp-data/*.json 2> /dev/null || true
+    # Do not remove modal credentials on exit anymore
+    # rm -r $ROOT_DIR/modal-login/temp-data/*.json 2> /dev/null || true
 
     # Kill all processes belonging to this script's process group
     kill -- -$$ || true
@@ -85,11 +85,11 @@ trap errnotify ERR
 
 echo -e "\033[38;5;224m"
 cat << "EOF"
-    ██████  ██            ███████ ██     ██  █████  ██████  ███    ███
-    ██   ██ ██            ██      ██     ██ ██   ██ ██   ██ ████  ████
-    ██████  ██      █████ ███████ ██  █  ██ ███████ ██████  ██ ████ ██
-    ██   ██ ██                 ██ ██ ███ ██ ██   ██ ██   ██ ██  ██  ██
-    ██   ██ ███████       ███████  ███ ███  ██   ██ ██   ██ ██      ██
+    ██████  ██              ███████ ██      ██  █████  ██████  ███    ███
+    ██   ██ ██              ██      ██      ██ ██   ██ ██   ██ ████  ████
+    ██████  ██        █████ ███████ ██  █   ██ ███████ ██████  ██ ████ ██
+    ██   ██ ██                    ██ ██ ███ ██ ██   ██ ██   ██ ██  ██  ██
+    ██   ██ ███████         ███████  ███ ███  ██   ██ ██   ██ ██      ██
 
     From Gensyn
 
@@ -99,95 +99,102 @@ EOF
 mkdir -p "$ROOT/logs"
 
 if [ "$CONNECT_TO_TESTNET" = true ]; then
-    # Run modal_login server.
-    echo "Please login to create an Ethereum Server Wallet"
-    cd modal-login
-    # Check if the yarn command exists; if not, install Yarn.
-
-    # Node.js + NVM setup
-    if ! command -v node > /dev/null 2>&1; then
-        echo "Node.js not found. Installing NVM and latest Node.js..."
-        export NVM_DIR="$HOME/.nvm"
-        if [ ! -d "$NVM_DIR" ]; then
-            curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
-        fi
-        [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
-        [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"
-        nvm install node
+    # Check if userData.json already exists. If so, skip the login process.
+    if [ -f "modal-login/temp-data/userData.json" ]; then
+        echo_green ">> Found existing login credentials. Skipping login."
+        ORG_ID=$(awk 'BEGIN { FS = "\"" } !/^[ \t]*[{}]/ { print $(NF - 1); exit }' modal-login/temp-data/userData.json)
+        echo "Your ORG_ID is set to: $ORG_ID"
     else
-        echo "Node.js is already installed: $(node -v)"
-    fi
+        # Run modal_login server.
+        echo "Please login to create an Ethereum Server Wallet"
+        cd modal-login
+        # Check if the yarn command exists; if not, install Yarn.
 
-    if ! command -v yarn > /dev/null 2>&1; then
-        # Detect Ubuntu (including WSL Ubuntu) and install Yarn accordingly
-        if grep -qi "ubuntu" /etc/os-release 2> /dev/null || uname -r | grep -qi "microsoft"; then
-            echo "Detected Ubuntu or WSL Ubuntu. Installing Yarn via apt..."
-            curl -sS https://dl.yarnpkg.com/debian/pubkey.gpg | sudo apt-key add -
-            echo "deb https://dl.yarnpkg.com/debian/ stable main" | sudo tee /etc/apt/sources.list.d/yarn.list
-            sudo apt update && sudo apt install -y yarn
+        # Node.js + NVM setup
+        if ! command -v node > /dev/null 2>&1; then
+            echo "Node.js not found. Installing NVM and latest Node.js..."
+            export NVM_DIR="$HOME/.nvm"
+            if [ ! -d "$NVM_DIR" ]; then
+                curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
+            fi
+            [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+            [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"
+            nvm install node
         else
-            echo "Yarn not found. Installing Yarn globally with npm (no profile edits)…"
-            # This lands in $NVM_DIR/versions/node/<ver>/bin which is already on PATH
-            npm install -g --silent yarn
+            echo "Node.js is already installed: $(node -v)"
         fi
-    fi
 
-    ENV_FILE="$ROOT"/modal-login/.env
-    if [[ "$OSTYPE" == "darwin"* ]]; then
-        # macOS version
-        sed -i '' "3s/.*/SMART_CONTRACT_ADDRESS=$SWARM_CONTRACT/" "$ENV_FILE"
-    else
-        # Linux version
-        sed -i "3s/.*/SMART_CONTRACT_ADDRESS=$SWARM_CONTRACT/" "$ENV_FILE"
-    fi
+        if ! command -v yarn > /dev/null 2>&1; then
+            # Detect Ubuntu (including WSL Ubuntu) and install Yarn accordingly
+            if grep -qi "ubuntu" /etc/os-release 2> /dev/null || uname -r | grep -qi "microsoft"; then
+                echo "Detected Ubuntu or WSL Ubuntu. Installing Yarn via apt..."
+                curl -sS https://dl.yarnpkg.com/debian/pubkey.gpg | sudo apt-key add -
+                echo "deb https://dl.yarnpkg.com/debian/ stable main" | sudo tee /etc/apt/sources.list.d/yarn.list
+                sudo apt update && sudo apt install -y yarn
+            else
+                echo "Yarn not found. Installing Yarn globally with npm (no profile edits)…"
+                # This lands in $NVM_DIR/versions/node/<ver>/bin which is already on PATH
+                npm install -g --silent yarn
+            fi
+        fi
 
-
-    # Docker image already builds it, no need to again.
-    if [ -z "$DOCKER" ]; then
-        yarn install --immutable
-        echo "Building server"
-        yarn build > "$ROOT/logs/yarn.log" 2>&1
-    fi
-    yarn start >> "$ROOT/logs/yarn.log" 2>&1 & # Run in background and log output
-
-    SERVER_PID=$!  # Store the process ID
-    echo "Started server process: $SERVER_PID"
-    sleep 5
-
-    # Try to open the URL in the default browser
-    if [ -z "$DOCKER" ]; then
-        if open http://localhost:3000 2> /dev/null; then
-            echo_green ">> Successfully opened http://localhost:3000 in your default browser."
+        ENV_FILE="$ROOT"/modal-login/.env
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+            # macOS version
+            sed -i '' "3s/.*/SMART_CONTRACT_ADDRESS=$SWARM_CONTRACT/" "$ENV_FILE"
         else
-            echo ">> Failed to open http://localhost:3000. Please open it manually."
+            # Linux version
+            sed -i "3s/.*/SMART_CONTRACT_ADDRESS=$SWARM_CONTRACT/" "$ENV_FILE"
         fi
-    else
-        echo_green ">> Please open http://localhost:3000 in your host browser."
-    fi
 
-    cd ..
 
-    echo_green ">> Waiting for modal userData.json to be created..."
-    while [ ! -f "modal-login/temp-data/userData.json" ]; do
-        sleep 5  # Wait for 5 seconds before checking again
-    done
-    echo "Found userData.json. Proceeding..."
+        # Docker image already builds it, no need to again.
+        if [ -z "$DOCKER" ]; then
+            yarn install --immutable
+            echo "Building server"
+            yarn build > "$ROOT/logs/yarn.log" 2>&1
+        fi
+        yarn start >> "$ROOT/logs/yarn.log" 2>&1 & # Run in background and log output
 
-    ORG_ID=$(awk 'BEGIN { FS = "\"" } !/^[ \t]*[{}]/ { print $(NF - 1); exit }' modal-login/temp-data/userData.json)
-    echo "Your ORG_ID is set to: $ORG_ID"
+        SERVER_PID=$!  # Store the process ID
+        echo "Started server process: $SERVER_PID"
+        sleep 5
 
-    # Wait until the API key is activated by the client
-    echo "Waiting for API key to become activated..."
-    while true; do
-        STATUS=$(curl -s "http://localhost:3000/api/get-api-key-status?orgId=$ORG_ID")
-        if [[ "$STATUS" == "activated" ]]; then
-            echo "API key is activated! Proceeding..."
-            break
+        # Try to open the URL in the default browser
+        if [ -z "$DOCKER" ]; then
+            if open http://localhost:3000 2> /dev/null; then
+                echo_green ">> Successfully opened http://localhost:3000 in your default browser."
+            else
+                echo ">> Failed to open http://localhost:3000. Please open it manually."
+            fi
         else
-            echo "Waiting for API key to be activated..."
-            sleep 5
+            echo_green ">> Please open http://localhost:3000 in your host browser."
         fi
-    done
+
+        cd ..
+
+        echo_green ">> Waiting for modal userData.json to be created..."
+        while [ ! -f "modal-login/temp-data/userData.json" ]; do
+            sleep 5  # Wait for 5 seconds before checking again
+        done
+        echo "Found userData.json. Proceeding..."
+
+        ORG_ID=$(awk 'BEGIN { FS = "\"" } !/^[ \t]*[{}]/ { print $(NF - 1); exit }' modal-login/temp-data/userData.json)
+        echo "Your ORG_ID is set to: $ORG_ID"
+
+        # Wait until the API key is activated by the client
+        echo "Waiting for API key to become activated..."
+        while true; do
+            STATUS=$(curl -s "http://localhost:3000/api/get-api-key-status?orgId=$ORG_ID")
+            if [[ "$STATUS" == "activated" ]]; then
+                echo "API key is activated! Proceeding..."
+                break
+            else
+                echo "Waiting for API key to be activated..."
+                sleep 5
+            fi
+        done
+    fi
 fi
 
 echo_green ">> Getting requirements..."
@@ -204,7 +211,7 @@ pip install hivemind@git+https://github.com/gensyn-ai/hivemind@639c964a8019de631
 
 if [ ! -d "$ROOT/configs" ]; then
     mkdir "$ROOT/configs"
-fi  
+fi
 if [ -f "$ROOT/configs/rg-swarm.yaml" ]; then
     # Use cmp -s for a silent comparison. If different, backup and copy.
     if ! cmp -s "$ROOT/rgym_exp/config/rg-swarm.yaml" "$ROOT/configs/rg-swarm.yaml"; then
@@ -262,4 +269,4 @@ python -m rgym_exp.runner.swarm_launcher \
     --config-path "$ROOT/rgym_exp/config" \
     --config-name "rg-swarm.yaml" 
 
-wait  # Keep script running until Ctrl+C
+wait # Keep script running until Ctrl+C
