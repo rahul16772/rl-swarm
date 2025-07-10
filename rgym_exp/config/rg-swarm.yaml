@@ -5,11 +5,11 @@ log_dir: ${oc.env:ROOT,.}/logs
 training:
   # Set to 'false' to enable training mode.
   # Set to 'true' for fast inference-only mode using vLLM.
-  use_vllm: true
+  use_vllm: false
 
   # Set to 'true' to enable mixed-precision training.
   # The python code is configured to use stable 'bfloat16' on compatible GPUs.
-  fp16: true
+  fp16: false
 
   max_round: 1000000
   max_stage: 1
@@ -83,7 +83,7 @@ game_manager:
       _target_: trl.trainer.GRPOConfig
       logging_dir: ${log_dir}
       fp16: ${training.fp16}
-      gradient_checkpointing: true
+      gradient_checkpointing: false
       max_completion_length: 512
 
     log_with: wandb
