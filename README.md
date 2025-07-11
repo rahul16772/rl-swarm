@@ -50,7 +50,7 @@ The easiest way to run RL Swarm is using Docker. This ensures a consistent setup
 #### 1. Clone this repo
 
 ```sh
-git clone https://github.com/gensyn-ai/rl-swarm
+git clone https://github.com/xailong-6969/rl-swarm
 ```
 
 #### 2. Install Docker
