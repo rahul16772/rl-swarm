@@ -136,7 +136,7 @@ fi
 
 echo_green ">> Installing Python requirements..."
 pip install --upgrade pip
-pip install git+https://github.com/xailong-6969/genrl.git
+pip install git+https://github.com/xailong-6969/genrl-swarm
 pip install reasoning-gym>=0.1.20
 pip install trl
 pip install vllm==0.7.3
