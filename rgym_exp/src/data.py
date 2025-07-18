@@ -298,6 +298,9 @@ class ReasoningGymDataManager(LocalMemoryTextDataManager):
                     for payload in swarm_states[agent][batch_id]:
                         if (
                             self.num_generations
+                            and hasattr(payload, 'actions')
+                            and payload.actions is not None
+                            and isinstance(payload.actions, list) 
                             and len(payload.actions) == self.num_generations
                         ):
                             transplants[(agent, batch_id)] = payload
