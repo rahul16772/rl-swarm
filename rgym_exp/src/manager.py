@@ -42,13 +42,7 @@ class SwarmGameManager(BaseGameManager, DefaultGameManagerMixin):
         hf_push_frequency: int = 20,
         **kwargs,
     ):
-        """
-        Initializes the SwarmGameManager.
 
-        This constructor sets up the game environment, including logging, communication,
-        blockchain coordination, and integration with the Hugging Face Hub. It also
-        handles specific configurations for running with or without vLLM.
-        """
         super().__init__(
             max_stage=max_stage,
             max_round=max_round,
@@ -87,11 +81,6 @@ class SwarmGameManager(BaseGameManager, DefaultGameManagerMixin):
             self.state.round
         )  # initialize communication module to contract's round
 
-        get_logger().info(
-            f"🐱 Hello 🐈 [{get_name_from_peer_id(self.peer_id)}] 🦮 [{self.peer_id}]!"
-        )
-        get_logger().info(f"bootnodes: {kwargs.get('bootnodes', [])}")
-        
         # --- VLLM INTEGRATION START ---
         # Safely get the model name first, then use it.
         model_name = "UnknownModel"
@@ -108,7 +97,7 @@ class SwarmGameManager(BaseGameManager, DefaultGameManagerMixin):
         
         get_logger().info(f"Using Model: {model_name}")
 
-        # Enable push to HF if token was provided
+        # enable push to HF if token was provided
         self.hf_token = hf_token
         if self.hf_token not in [None, "None"]:
             # This block should only run if we can actually push, which means we're NOT in vLLM mode.
@@ -130,17 +119,20 @@ class SwarmGameManager(BaseGameManager, DefaultGameManagerMixin):
                 get_logger().info("Hugging Face push is disabled in vLLM mode.")
         # --- VLLM INTEGRATION END ---
 
+        get_logger().info(
+            f"🐱 Hello 🐈 [{get_name_from_peer_id(self.peer_id)}] 🦮 [{self.peer_id}]!"
+        )
+        get_logger().info(f"bootnodes: {kwargs.get('bootnodes', [])}")
+
         with open(os.path.join(log_dir, f"system_info.txt"), "w") as f:
             f.write(get_system_info())
 
-        # Time-based submission attributes
         self.batched_signals = 0.0
         self.time_since_submit = time.time() #seconds
         self.submit_period = 3.0 #hours
         self.submitted_this_round = False
 
     def _get_total_rewards_by_agent(self):
-        """Aggregates total rewards for each agent across all stages."""
         rewards_by_agent = defaultdict(int)
         for stage in range(self.state.stage):
             rewards = self.rewards[stage]
@@ -150,41 +142,54 @@ class SwarmGameManager(BaseGameManager, DefaultGameManagerMixin):
                     for generation_rewards in batch_rewards:
                         tot += sum(generation_rewards)
                     rewards_by_agent[agent_id] += tot
+
         return rewards_by_agent
 
     def _get_my_rewards(self, signal_by_agent):
-        """Calculates the adjusted reward signal for the current agent."""
-        my_signal = signal_by_agent.get(self.peer_id, 0)
+        if len(signal_by_agent) == 0:
+            return 0
+        if self.peer_id in signal_by_agent:
+            my_signal = signal_by_agent[self.peer_id]
+        else:
+            my_signal = 0
         my_signal = (my_signal + 1) * (my_signal > 0) + my_signal * (
             my_signal <= 0
         )
         return my_signal
 
     def _try_submit_to_chain(self, signal_by_agent):
-        """Submits rewards and winners to the chain if the submission period has elapsed."""
         elapsed_time_hours = (time.time() - self.time_since_submit) / 3600
         if elapsed_time_hours > self.submit_period:
-            get_logger().info(f"Submitting batched signal of {int(self.batched_signals)} to the chain.")
-            self.coordinator.submit_reward(
-                self.state.round, 0, int(self.batched_signals), self.peer_id
-            )
-            self.batched_signals = 0.0
-            
-            if signal_by_agent:
-                max_agent, max_signal = max(signal_by_agent.items(), key=lambda x: x[1])
+            try:
+                self.coordinator.submit_reward(
+                    self.state.round, 0, int(self.batched_signals), self.peer_id
+                )
+                self.batched_signals = 0.0
+                if len(signal_by_agent) > 0:
+                    max_agent, max_signal = max(signal_by_agent.items(), key=lambda x: x[1])
+                else: # if we have no signal_by_agents, just submit ourselves.
+                    max_agent = self.peer_id
+
                 self.coordinator.submit_winners(self.state.round, [max_agent], self.peer_id)
-            
-            self.time_since_submit = time.time()
-            self.submitted_this_round = True
+                self.time_since_submit = time.time()
+                self.submitted_this_round = True
+            except Exception as e:
+                get_logger().exception(
+                    "Failed to submit to chain.\n"
+                    "This is most likely transient and will recover.\n"
+                    "There is no need to kill the program.\n"
+                    "If you encounter this error, please report it to Gensyn by\n"
+                    "filing a github issue here: https://github.com/gensyn-ai/rl-swarm/issues/ \n"
+                    "including the full stacktrace."
+                )
+
 
     def _hook_after_rewards_updated(self):
-        """Hook called after rewards are updated. Batches signals and tries to submit."""
         signal_by_agent = self._get_total_rewards_by_agent()
         self.batched_signals += self._get_my_rewards(signal_by_agent)
         self._try_submit_to_chain(signal_by_agent)
 
     def _hook_after_round_advanced(self):
-        """Hook called after the round advances."""
         self._save_to_hf()
 
         # Try to submit to chain again if necessary, but don't update our signal twice
@@ -199,16 +204,15 @@ class SwarmGameManager(BaseGameManager, DefaultGameManagerMixin):
         self.agent_block()
 
     def _hook_after_game(self):
-        """Hook called after the game finishes. Performs a final save to the HF hub."""
         self._save_to_hf()
 
     def _save_to_hf(self):
-        """Saves the model to the Hugging Face Hub if configured."""
+        # This check also implicitly prevents pushes in vLLM mode because hf_token setup is skipped
         if (
             self.hf_token not in [None, "None"]
             and self.state.round % self.hf_push_frequency == 0
         ):
-            get_logger().info(f"Pushing model to huggingface for round {self.state.round}")
+            get_logger().info(f"pushing model to huggingface")
             try:
                 repo_id = self.trainer.args.hub_model_id
                 if repo_id is None:
@@ -235,15 +239,11 @@ class SwarmGameManager(BaseGameManager, DefaultGameManagerMixin):
     def agent_block(
         self, check_interval=5.0, log_timeout=10.0, max_check_interval=60.0 * 15
     ):
-        """Blocks execution until the coordinator signals the next round."""
         start_time = time.monotonic()
         fetch_log_time = start_time
         check_backoff = (
             check_interval  # Exponential backoff for already finished rounds.
         )
-        
-        get_logger().info(f"Waiting for round {self.state.round} to complete...")
-
         while time.monotonic() - start_time < self.train_timeout:
             curr_time = time.monotonic()
             _ = self.communication.dht.get_visible_maddrs(latest=True)
@@ -267,16 +267,13 @@ class SwarmGameManager(BaseGameManager, DefaultGameManagerMixin):
                 self.state.round = round_num  # advance to swarm's round.
                 return
             else:
-                if curr_time - fetch_log_time > log_timeout:
-                    get_logger().info(
-                        f"Still waiting for round {self.state.round}. Current swarm round is {round_num}. Next check in {check_backoff:.1f}s."
-                    )
-                    fetch_log_time = curr_time
+                get_logger().info(
+                    f"Already finished round: {round_num}. Next check in {check_backoff}s."
+                )
                 time.sleep(check_backoff)
                 check_backoff = min(check_backoff * 2, max_check_interval)
 
             if round_num == self.max_round - 1:
-                get_logger().info("Max round reached. Concluding training.")
                 return
 
-        get_logger().warning("Training timed out!")
+        get_logger().info("Training timed out!")
