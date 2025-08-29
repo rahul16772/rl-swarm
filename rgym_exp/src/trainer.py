@@ -11,12 +11,6 @@ from reasoning_gym.utils import SYSTEM_PROMPTS
 from rgym_exp.src.utils.judge_client import JudgeClient
 from rgym_exp.src.prg_module import PRGGameStatus
 
-# --- ADDED: vLLM imports ---
-try:
-    from vllm import LLM, SamplingParams
-except ImportError:
-    LLM, SamplingParams = None, None
-
 
 PRG_SYSTEM_PROMPT = """Given a question, hints, and possible answers, your task is to answer the question by thinking step-by-step in a clear and specific manner for 1 line only.
 Your answer MUST be one of the possible answers. Provide the answer in the following format:
@@ -50,6 +44,7 @@ class GRPOTrainerModule(GRPOLanguageTrainerModule, LoggerMixin):
         judge_base_url = kwargs.get("judge_base_url", None)
         self.judge_client = JudgeClient(judge_base_url) if judge_base_url else None
 
+
     @torch.no_grad()
     def evaluate(
         self, state: GameState, data_manager: DataManager, reward_manager: RewardManager
@@ -58,7 +53,11 @@ class GRPOTrainerModule(GRPOLanguageTrainerModule, LoggerMixin):
             return
             
         try:
-            model_name = self.model.config._name_or_path
+            # RESTORED: Use original method for getting model name, now compatible with Unsloth/PEFT
+            if self.args.use_unsloth and hasattr(self.model, 'peft_config'):
+                model_name = self.model.peft_config['default'].base_model_name_or_path
+            else:
+                model_name = self.model.config._name_or_path
         except AttributeError:
             model_name = "none"
 
@@ -77,34 +76,23 @@ class GRPOTrainerModule(GRPOLanguageTrainerModule, LoggerMixin):
             {"role": "system", "content": SYSTEM_PROMPTS["default"]},
             {"role": "user", "content": result["question"]},
         ]
+        input_ids = self.processing_class.apply_chat_template(
+            prompt,
+            tokenize=True,
+            add_generation_prompt=True,
+            return_tensors="pt",
+        )
+
+        # RESTORED: Original generation logic structure
+        # TODO: Make the dtype changes from genrl here
+        input_ids = input_ids.to(self.device)
+        # NOTE: self.model is now the correct Unsloth/PEFT model from the base class
+        outputs = self.model.generate(input_ids, max_new_tokens=512)
         
-        answer = ""
-        # --- MODIFIED: Use vLLM if available, otherwise fallback ---
-        if self.vllm_engine:
-            # 1. vLLM Path for fast generation
-            prompt_string = self.processing_class.apply_chat_template(
-                prompt, tokenize=False, add_generation_prompt=True
-            )
-            sampling_params = SamplingParams(n=1, temperature=0.7, max_tokens=512)
-            outputs = self.vllm_engine.generate([prompt_string], sampling_params, use_tqdm=False)
-            full_response = outputs[0].outputs[0].text
-            answer = full_response.strip()
-
-        else:
-            # 2. Standard Hugging Face Path (e.g., for BitsAndBytes)
-            input_tokens = self.processing_class.apply_chat_template(
-                prompt,
-                tokenize=True,
-                add_generation_prompt=True,
-                return_tensors="pt",
-            ).to(self.model.device)
-
-            outputs = self.model.generate(input_tokens, max_new_tokens=512)
-            
-            # Correctly decode only the generated part of the response
-            prompt_length = input_tokens.shape[1]
-            answer_tokens = outputs[0, prompt_length:]
-            answer = self.processing_class.decode(answer_tokens, skip_special_tokens=True).strip()
+        # FIXED: Correctly decode only the generated part, not the whole prompt
+        answer = self.processing_class.decode(
+            outputs[0, input_ids.shape[1]:], skip_special_tokens=True
+        )
         
         # Submit answer to judge service
         self.judge_client.submit_answer(
@@ -112,6 +100,7 @@ class GRPOTrainerModule(GRPOLanguageTrainerModule, LoggerMixin):
             round_number=state.round,
             user_answer=answer
         )
+
 
     @torch.no_grad()
     def play_prg_game_logits(
@@ -133,7 +122,7 @@ class GRPOTrainerModule(GRPOLanguageTrainerModule, LoggerMixin):
         clue = game_clue_dict.get("clue") or ""
         choices = game_clue_dict.get("choices") or []
         
-        # No active game
+        
         if any(val < 0 for val in (game_id, clue_id, rounds_remaining)):
             return {'status': PRGGameStatus.NO_ACTIVE_GAME}
         # We have already answered this clue
@@ -159,8 +148,12 @@ class GRPOTrainerModule(GRPOLanguageTrainerModule, LoggerMixin):
                 tokenize=True,
                 add_generation_prompt=True,
                 return_tensors="pt",
-            ).to(self.model.device)
+            )
 
+            # RESTORED: Original structure
+            # TODO: Make the dtype changes from genrl here?
+            input_ids = input_ids.to(self.device)
+            
             # Get logits for each choice
             choice_logits = self._get_choice_logits(input_ids, choices)
             
@@ -187,19 +180,21 @@ class GRPOTrainerModule(GRPOLanguageTrainerModule, LoggerMixin):
         """
 
         device = input_ids.device
-        prompt_len = input_ids.shape[1]
+        batch_size, prompt_len = input_ids.shape
         logits_list = []
 
         for choice in choices:
             # 1) build the full token sequence: prompt + "<answer>…</answer>"
+            # RESTORED: Original structure
+            # TODO: Make the dtype changes from genrl here?
             answer_str = f"<answer>{choice}</answer>"
             choice_ids = self.processing_class(
                 answer_str,
                 return_tensors="pt",
                 add_special_tokens=False
-            ).input_ids.to(device)
+            ).input_ids.to(device)   # shape (1, L)
 
-            seq = torch.cat([input_ids, choice_ids], dim=1)
+            seq = torch.cat([input_ids, choice_ids], dim=1)  # (1, prompt_len + L)
 
             # build labels that only include the answer positions
             labels = seq.clone()
@@ -212,4 +207,3 @@ class GRPOTrainerModule(GRPOLanguageTrainerModule, LoggerMixin):
 
         # stack into a single tensor of shape (num_choices,)
         return torch.stack(logits_list)
-
