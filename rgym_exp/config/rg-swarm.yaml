@@ -67,11 +67,14 @@ game_manager:
             - _target_: rgym_exp.src.rewards.RGRewards
   trainer:
     _target_: rgym_exp.src.trainer.GRPOTrainerModule
-    models:
-      - _target_: transformers.AutoModelForCausalLM.from_pretrained
-        pretrained_model_name_or_path: ${oc.env:MODEL_NAME, ${gpu_model_choice:${default_large_model_pool},${default_small_model_pool}}} 
     config:
       _target_: genrl.trainer.grpo_trainer.GRPOTrainerConfig
+      model_name_or_path: ${oc.env:MODEL_NAME, ${gpu_model_choice:${default_large_model_pool},${default_small_model_pool}}}
+      use_vllm: true
+      vllm_gpu_utilization: 0.9
+      # bitsandbytes quantization options (enable one at most)
+      load_in_4bit: false
+      load_in_8bit: false
       dtype: ${training.dtype}
       epsilon: 0.2
       epsilon_high: 0.28
