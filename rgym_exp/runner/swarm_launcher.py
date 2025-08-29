@@ -1,5 +1,7 @@
 import os
 
+# ADDED: vllm import for consistency
+import vllm
 import hydra
 from genrl.communication.communication import Communication
 from genrl.communication.hivemind.hivemind_backend import (
