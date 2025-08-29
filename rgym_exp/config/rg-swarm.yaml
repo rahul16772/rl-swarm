@@ -21,9 +21,9 @@ training:
 
 blockchain:
   alchemy_url: "https://gensyn-testnet.g.alchemy.com/public"
-  swarm_contract_address: ${oc.env:SWARM_CONTRACT,null} 
-  org_id: ${oc.env:ORG_ID,null} 
-  mainnet_chain_id: 685685 
+  swarm_contract_address: ${oc.env:SWARM_CONTRACT,null} # This is set by modal-login in run_rl_swarm.sh
+  org_id: ${oc.env:ORG_ID,null} # This is set by modal-login in run_rl_swarm.sh
+  mainnet_chain_id: 685685 # currently unused, will be used with WalletSwarmCoordinator
   modal_proxy_url: "http://localhost:3000/api/"
   swarm_coordinator_abi_path: "rgym_exp/contracts/SwarmCoordinator_0.4.2.json"
 
@@ -51,7 +51,7 @@ game_manager:
   run_mode: "train_and_evaluate"
   bootnodes: ${communications.initial_peers}
   prg_game_config: ${prg_game_config}
-  game_state: 
+  game_state:
     _target_: genrl.state.game_state.GameState
     round: 0
     stage: 0
@@ -66,10 +66,10 @@ game_manager:
           reward_fns:
             - _target_: rgym_exp.src.rewards.RGRewards
   trainer:
-    _target_: rgym_exp.src.trainer.GRPOTrainerModule
+    _target_: rgym_exp.src.trainer.GRPOLanguageTrainerModule
     models:
       - _target_: transformers.AutoModelForCausalLM.from_pretrained
-        pretrained_model_name_or_path: ${oc.env:MODEL_NAME, ${gpu_model_choice:${default_large_model_pool},${default_small_model_pool}}} 
+        pretrained_model_name_or_path: ${oc.env:MODEL_NAME, ${gpu_model_choice:${default_large_model_pool},${default_small_model_pool}}}
     config:
       _target_: genrl.trainer.grpo_trainer.GRPOTrainerConfig
       dtype: ${training.dtype}
@@ -77,22 +77,27 @@ game_manager:
       epsilon_high: 0.28
       num_generations: ${training.num_generations}
 
-      # --- ADDED: CHOOSE YOUR BACKEND ---
-      # Set use_vllm to true for fast generation. The training model will not be quantized.
-      use_vllm: false
+      # --- ADDED: Unsloth, vLLM, & Optimizer Configuration ---
+      use_unsloth: true
+      use_bitsandbytes: true # Keep true when using Unsloth
+      use_vllm: false        # RESTORED: Set to true to enable vLLM for generation
 
-      # Set use_bitsandbytes to true for memory-efficient training. Generation will use the quantized model.
-      # Note: If both are true, generation uses vLLM and training uses a quantized model.
-      use_bitsandbytes: true
+      optimizer:
+        name: "adamw_8bit"   # Options: 'adamw_8bit' or 'adamw'
+        weight_decay: 0.01
 
-      # --- ADDED: vLLM Parameters (only used if use_vllm: true) ---
-      vllm_gpu_memory_utilization: 0.9
-
-      # --- ADDED: BitsAndBytes Parameters (only used if use_bitsandbytes: true) ---
-      bnb_load_in_4bit: true
-      bnb_load_in_8bit: false
-      bnb_4bit_quant_type: "nf4"
-      bnb_4bit_compute_dtype: "bfloat16"
+      unsloth_peft:
+        r: 16
+        lora_alpha: 32
+        target_modules: ["q_proj", "k_proj", "v_proj", "o_proj"] # Adjust for your model
+        lora_dropout: 0
+        bias: "none"
+        use_gradient_checkpointing: true
+        
+      # RESTORED: vLLM configuration block
+      vllm:
+        gpu_memory_utilization: 0.9
+        tensor_parallel_size: 1
 
     log_with: wandb
     log_dir: ${log_dir}
@@ -120,7 +125,7 @@ game_manager:
     modal_proxy_url: ${blockchain.modal_proxy_url}
     swarm_coordinator_abi_json: ${blockchain.swarm_coordinator_abi_path}
 
-default_large_model_pool: 
+default_large_model_pool:
   - nvidia/AceInstruct-1.5B
   - dnotitia/Smoothie-Qwen3-1.7B
   - Gensyn/Qwen2.5-1.5B-Instruct
@@ -128,3 +133,4 @@ default_large_model_pool:
 default_small_model_pool:
   - Gensyn/Qwen2.5-0.5B-Instruct
   - Qwen/Qwen3-0.6B
+
