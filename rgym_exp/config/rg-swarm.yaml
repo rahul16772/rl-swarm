@@ -17,7 +17,7 @@ training:
   num_generations: 2
   num_transplant_trees: 2
   seed: 42
-  dtype: 'float32'
+  dtype: 'float32' # float16 or bfloat16 is highly recommended for performance
 
 blockchain:
   alchemy_url: "https://gensyn-testnet.g.alchemy.com/public"
@@ -38,7 +38,7 @@ prg_game_config:
 communications:
   initial_peers:
     - '/ip4/38.101.215.12/tcp/30011/p2p/QmQ2gEXoPJg6iMBSUFWGzAabS2VhnzuS782Y637hGjfsRJ'
-    - '/ip4/38.101.215.13/tcp/30012/p2p/QmWhiaLrx3HRZfgXc2i7KW5nMUNK7P9tRc71yFJdGEZKkC'
+    - '/ip4/3.101.215.13/tcp/30012/p2p/QmWhiaLrx3HRZfgXc2i7KW5nMUNK7P9tRc71yFJdGEZKkC'
     - '/ip4/38.101.215.14/tcp/30013/p2p/QmQa1SCfYTxx7RvU7qJJRo79Zm1RAwPpkeLueDVJuBBmFp'
 
 game_manager:
@@ -66,7 +66,10 @@ game_manager:
           reward_fns:
             - _target_: rgym_exp.src.rewards.RGRewards
   trainer:
-    _target_: rgym_exp.src.trainer.GRPOLanguageTrainerModule
+    # --- THIS IS THE CRITICAL FIX ---
+    # This now correctly points to YOUR specialized trainer file, which has the game logic.
+    _target_: rgym_exp.src.trainer.GRPOTrainerModule
+
     models:
       - _target_: transformers.AutoModelForCausalLM.from_pretrained
         pretrained_model_name_or_path: ${oc.env:MODEL_NAME, ${gpu_model_choice:${default_large_model_pool},${default_small_model_pool}}}
@@ -76,28 +79,19 @@ game_manager:
       epsilon: 0.2
       epsilon_high: 0.28
       num_generations: ${training.num_generations}
-
-      # --- ADDED: Unsloth, vLLM, & Optimizer Configuration ---
       use_unsloth: true
-      use_bitsandbytes: true # Keep true when using Unsloth
-      use_vllm: false        # RESTORED: Set to true to enable vLLM for generation
-
+      use_bitsandbytes: false
+      use_vllm: false # Can be enabled for hybrid mode
       optimizer:
-        name: "adamw_8bit"   # Options: 'adamw_8bit' or 'adamw'
+        name: "adamw_8bit"
         weight_decay: 0.01
-
       unsloth_peft:
         r: 16
         lora_alpha: 32
-        target_modules: ["q_proj", "k_proj", "v_proj", "o_proj"] # Adjust for your model
+        target_modules: ["q_proj", "k_proj", "v_proj", "o_proj"]
         lora_dropout: 0
         bias: "none"
         use_gradient_checkpointing: true
-        
-      # RESTORED: vLLM configuration block
-      vllm:
-        gpu_memory_utilization: 0.9
-        tensor_parallel_size: 1
 
     log_with: wandb
     log_dir: ${log_dir}
@@ -133,4 +127,3 @@ default_large_model_pool:
 default_small_model_pool:
   - Gensyn/Qwen2.5-0.5B-Instruct
   - Qwen/Qwen3-0.6B
-
