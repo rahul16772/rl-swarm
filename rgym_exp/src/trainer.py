@@ -25,7 +25,6 @@ Do not explain your reasoning at all, provide only the final answer in the answe
 """
 
 
-
 class GRPOTrainerModule(GRPOLanguageTrainerModule, LoggerMixin):
     """
     Trainer for the Group Relative Policy Optimization (GRPO) method.
@@ -44,7 +43,6 @@ class GRPOTrainerModule(GRPOLanguageTrainerModule, LoggerMixin):
         judge_base_url = kwargs.get("judge_base_url", None)
         self.judge_client = JudgeClient(judge_base_url) if judge_base_url else None
 
-
     @torch.no_grad()
     def evaluate(
         self, state: GameState, data_manager: DataManager, reward_manager: RewardManager
@@ -53,11 +51,7 @@ class GRPOTrainerModule(GRPOLanguageTrainerModule, LoggerMixin):
             return
             
         try:
-            # RESTORED: Use original method for getting model name, now compatible with Unsloth/PEFT
-            if self.args.use_unsloth and hasattr(self.model, 'peft_config'):
-                model_name = self.model.peft_config['default'].base_model_name_or_path
-            else:
-                model_name = self.model.config._name_or_path
+            model_name = self.model.name_or_path
         except AttributeError:
             model_name = "none"
 
@@ -83,15 +77,12 @@ class GRPOTrainerModule(GRPOLanguageTrainerModule, LoggerMixin):
             return_tensors="pt",
         )
 
-        # RESTORED: Original generation logic structure
-        # TODO: Make the dtype changes from genrl here
-        input_ids = input_ids.to(self.device)
-        # NOTE: self.model is now the correct Unsloth/PEFT model from the base class
-        outputs = self.model.generate(input_ids, max_new_tokens=512)
-        
-        # FIXED: Correctly decode only the generated part, not the whole prompt
+        # TODO: Make the dtype changes from genrl here?
+        input_ids = input_ids.to(self.model.device)
+        attention_mask = torch.ones_like(input_ids, device=self.model.device)
+        outputs = self.model.generate(input_ids, attention_mask=attention_mask, max_new_tokens=512)
         answer = self.processing_class.decode(
-            outputs[0, input_ids.shape[1]:], skip_special_tokens=True
+            outputs[0], skip_special_tokens=True
         )
         
         # Submit answer to judge service
@@ -100,7 +91,6 @@ class GRPOTrainerModule(GRPOLanguageTrainerModule, LoggerMixin):
             round_number=state.round,
             user_answer=answer
         )
-
 
     @torch.no_grad()
     def play_prg_game_logits(
@@ -122,7 +112,7 @@ class GRPOTrainerModule(GRPOLanguageTrainerModule, LoggerMixin):
         clue = game_clue_dict.get("clue") or ""
         choices = game_clue_dict.get("choices") or []
         
-        
+        # No active game
         if any(val < 0 for val in (game_id, clue_id, rounds_remaining)):
             return {'status': PRGGameStatus.NO_ACTIVE_GAME}
         # We have already answered this clue
@@ -150,9 +140,8 @@ class GRPOTrainerModule(GRPOLanguageTrainerModule, LoggerMixin):
                 return_tensors="pt",
             )
 
-            # RESTORED: Original structure
             # TODO: Make the dtype changes from genrl here?
-            input_ids = input_ids.to(self.device)
+            input_ids = input_ids.to(self.model.device)
             
             # Get logits for each choice
             choice_logits = self._get_choice_logits(input_ids, choices)
@@ -185,21 +174,21 @@ class GRPOTrainerModule(GRPOLanguageTrainerModule, LoggerMixin):
 
         for choice in choices:
             # 1) build the full token sequence: prompt + "<answer>…</answer>"
-            # RESTORED: Original structure
             # TODO: Make the dtype changes from genrl here?
             answer_str = f"<answer>{choice}</answer>"
             choice_ids = self.processing_class(
                 answer_str,
                 return_tensors="pt",
                 add_special_tokens=False
-            ).input_ids.to(device)   # shape (1, L)
+            ).input_ids.to(device)    # shape (1, L)
 
             seq = torch.cat([input_ids, choice_ids], dim=1)  # (1, prompt_len + L)
+            attention_mask = torch.ones_like(seq, device=device)
 
             # build labels that only include the answer positions
             labels = seq.clone()
             labels[:, :prompt_len] = -100  # ignore prompt positions in loss
-            outputs = self.model(input_ids=seq, labels=labels)
+            outputs = self.model(input_ids=seq, attention_mask=attention_mask, labels=labels)
             # outputs.loss is average negative log-likelihood over the L answer tokens
 
             total_log_prob = -outputs.loss * choice_ids.size(1)
