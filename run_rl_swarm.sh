@@ -69,8 +69,8 @@ ROOT_DIR="$(cd $(dirname ${BASH_SOURCE[0]}) && pwd)"
 cleanup() {
     echo_green ">> Shutting down trainer..."
 
-    # Remove modal credentials if they exist
-    rm -r $ROOT_DIR/modal-login/temp-data/*.json 2> /dev/null || true
+    # MODIFIED: The following line is commented out to prevent deleting login credentials on exit.
+    # rm -r $ROOT_DIR/modal-login/temp-data/*.json 2> /dev/null || true
 
     # Kill all processes belonging to this script's process group
     kill -- -$$ || true
@@ -87,11 +87,11 @@ trap errnotify ERR
 
 echo -e "\033[38;5;224m"
 cat << "EOF"
-    ██████  ██            ███████ ██     ██  █████  ██████  ███    ███
-    ██   ██ ██            ██      ██     ██ ██   ██ ██   ██ ████  ████
-    ██████  ██      █████ ███████ ██  █  ██ ███████ ██████  ██ ████ ██
-    ██   ██ ██                 ██ ██ ███ ██ ██   ██ ██   ██ ██  ██  ██
-    ██   ██ ███████       ███████  ███ ███  ██   ██ ██   ██ ██      ██
+    ██████  ██           ███████ ██   ██  █████  ██████  ███   ███
+    ██   ██ ██           ██      ██   ██ ██   ██ ██   ██ ████  ████
+    ██████  ██     █████ ███████ ██ █ ██ ███████ ██████  ██ ████ ██
+    ██   ██ ██           ██ ██ ███ ██ ██   ██ ██   ██ ██  ██  ██
+    ██   ██ ███████      ███████  ███ ███  ██   ██ ██   ██ ██      ██
 
     From Gensyn
 
@@ -172,28 +172,30 @@ if [ "$CONNECT_TO_TESTNET" = true ]; then
 
     cd ..
 
-    echo_green ">> Waiting for modal userData.json to be created..."
-    while [ ! -f "modal-login/temp-data/userData.json" ]; do
-        sleep 5  # Wait for 5 seconds before checking again
-    done
-    echo "Found userData.json. Proceeding..."
-
-    ORG_ID=$(awk 'BEGIN { FS = "\"" } !/^[ \t]*[{}]/ { print $(NF - 1); exit }' modal-login/temp-data/userData.json)
-    echo "Your ORG_ID is set to: $ORG_ID"
-
-    # Wait until the API key is activated by the client
-    echo "Waiting for API key to become activated..."
-    while true; do
-        STATUS=$(curl -s "http://localhost:3000/api/get-api-key-status?orgId=$ORG_ID")
-        if [[ "$STATUS" == "activated" ]]; then
-            echo "API key is activated! Proceeding..."
-            break
-        else
-            echo "Waiting for API key to be activated..."
+    # Check for existing credentials or guide user through login
+    if [ -f "modal-login/temp-data/userData.json" ]; then
+        echo_green ">> Found existing login credentials."
+        ORG_ID=$(awk 'BEGIN { FS = "\"" } !/^[ \t]*[{}]/ { print $(NF - 1); exit }' modal-login/temp-data/userData.json)
+    else
+        echo_green ">> Please log in via your browser at http://localhost:3000"
+        while [ ! -f "modal-login/temp-data/userData.json" ]; do
             sleep 5
-        fi
-    done
-fi
+        done
+        echo "Found userData.json. Proceeding..."
+        ORG_ID=$(awk 'BEGIN { FS = "\"" } !/^[ \t]*[{}]/ { print $(NF - 1); exit }' modal-login/temp-data/userData.json)
+        
+        while true; do
+            STATUS=$(curl -s "http://localhost:3000/api/get-api-key-status?orgId=$ORG_ID")
+            if [[ "$STATUS" == "activated" ]]; then
+                echo "API key is activated! Proceeding..."
+                break
+            else
+                sleep 5
+            fi
+        done
+    fi
+    echo "Your ORG_ID is set to: $ORG_ID"
+fi 
 
 echo_green ">> Getting requirements..."
 pip install --upgrade pip
