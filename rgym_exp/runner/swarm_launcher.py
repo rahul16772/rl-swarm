@@ -1,6 +1,5 @@
 import os
-
-# ADDED: vllm import for consistency
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
 import vllm
 import hydra
 from genrl.communication.communication import Communication
@@ -29,3 +28,5 @@ if __name__ == "__main__":
     os.environ["HYDRA_FULL_ERROR"] = "1"
     Communication.set_backend(HivemindBackend)
     main()
+
+
