@@ -1,5 +1,9 @@
 import os
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
+try:
+    import unsloth
+except ImportError:
+    pass
 import vllm
 import hydra
 from genrl.communication.communication import Communication
@@ -28,5 +32,4 @@ if __name__ == "__main__":
     os.environ["HYDRA_FULL_ERROR"] = "1"
     Communication.set_backend(HivemindBackend)
     main()
-
 
