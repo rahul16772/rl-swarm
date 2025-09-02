@@ -17,7 +17,7 @@ training:
   num_generations: 2
   num_transplant_trees: 2
   seed: 42
-  dtype: 'float32' # float16 or bfloat16 is highly recommended for performance
+  dtype: 'bfloat16' # float16 or bfloat16 is highly recommended for performance
 
 blockchain:
   alchemy_url: "https://gensyn-testnet.g.alchemy.com/public"
@@ -79,7 +79,7 @@ game_manager:
       epsilon: 0.2
       epsilon_high: 0.28
       num_generations: ${training.num_generations}
-      use_unsloth: true
+      use_unsloth: false
       use_bitsandbytes: false
       use_vllm: false # Can be enabled for hybrid mode
       optimizer:
