@@ -79,9 +79,8 @@ game_manager:
       epsilon: 0.2
       epsilon_high: 0.28
       num_generations: ${training.num_generations}
-      use_unsloth: false
       use_bitsandbytes: false
-      use_vllm: false # Can be enabled for hybrid mode
+      use_vllm: false 
       optimizer:
         name: "adamw_8bit"
         weight_decay: 0.01
