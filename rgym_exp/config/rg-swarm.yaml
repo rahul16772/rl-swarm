@@ -31,6 +31,7 @@ eval:
   judge_base_url: "https://swarm-judge.internal-apps-central1.clusters.gensyn.ai"
 
 prg_game_config:
+  # This is now restored to the official version.
   prg_game: ${oc.env:PRG_GAME,null}
   org_id: ${blockchain.org_id}
   modal_proxy_url: ${blockchain.modal_proxy_url}
@@ -66,8 +67,6 @@ game_manager:
           reward_fns:
             - _target_: rgym_exp.src.rewards.RGRewards
   trainer:
-    # --- THIS IS THE CRITICAL FIX ---
-    # This now correctly points to YOUR specialized trainer file, which has the game logic.
     _target_: rgym_exp.src.trainer.GRPOTrainerModule
 
     models:
@@ -79,22 +78,18 @@ game_manager:
       epsilon: 0.2
       epsilon_high: 0.28
       num_generations: ${training.num_generations}
-      use_bitsandbytes: false
-      use_vllm: false 
+      
+      # --- THIS IS THE HYBRID MODE CONFIGURATION ---
+      use_bitsandbytes: true
+      use_vllm: true
+      
       optimizer:
-        name: "adamw_8bit"
+        name: "choose"
         weight_decay: 0.01
-      unsloth_peft:
-        r: 16
-        lora_alpha: 32
-        target_modules: ["q_proj", "k_proj", "v_proj", "o_proj"]
-        lora_dropout: 0
-        bias: "none"
-        use_gradient_checkpointing: true
-
-    log_with: wandb
-    log_dir: ${log_dir}
-    judge_base_url: ${eval.judge_base_url}
+      
+  log_with: wandb
+  log_dir: ${log_dir}
+  judge_base_url: ${eval.judge_base_url}
   data_manager:
     _target_: rgym_exp.src.data.ReasoningGymDataManager
     yaml_config_path: "rgym_exp/src/datasets.yaml"
