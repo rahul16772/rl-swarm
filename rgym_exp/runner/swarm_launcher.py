@@ -1,5 +1,4 @@
 import os
-import vllm
 import hydra
 from genrl.communication.communication import Communication
 from genrl.communication.hivemind.hivemind_backend import (
